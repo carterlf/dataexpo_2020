@@ -1,26 +1,31 @@
 library(tidyverse)
 library(shiny)
+library(plotly)
 library(ggthemes)
 library(forcats)
+library(leaflet)
+library(ggpubr)
 
-setwd("C:\\Users\\lfcar\\Documents\\Junior\\DataExpo 2019-2020\\summer2020")
+#setwd("C:\\Users\\lfcar\\Documents\\Junior\\DataExpo 2019-2020\\summer2020")
+setwd("C:/Users/Matthew/Documents/_My Actual Documents/Miami/STA Project/7-13-2020")
 load("countySums.Rdata")
 load("countySums2.Rdata")
 
 countySums1 <- countySums1 %>%
-  select(year:daysUnder30, climateRegion)
+  select(year:daysUnder30, climateRegion, binary_status)
 names(countySums1) <- c("year","county","p90_total","lro90_total","do90_total",
-                        "p30_total","lro30_total","du30_total","climateRegion")
+                        "p30_total","lro30_total","du30_total",'climateRegion',"binary_status")
 
 county_full <- county_full %>%
   mutate(state = gsub(".*,", "", county))
 
-counties <- map_data("county") %>%
-  mutate(fullname = str_remove_all(paste0(subregion,",",region), " "))
-county_map <- left_join(counties, county_full, by=c("fullname"="county"))
-
-region_choices <- c("Central", "East North Central", "Northeast","Northwest","South",
-                    "Southeast", "Southwest", "West","West North Central")
+#counties <- tigris::counties()
+#counties_map <- sp::merge(counties, county_full, by.x = "GEOID", by.y = "geoid")
+counties_map <- county_full %>% 
+  mutate(countyName = gsub(",.*$", "", county),
+         state = gsub(".*,", "", county)) %>% 
+  full_join(map_data("county") %>% mutate(region = gsub(" ", "", region),
+                                          subregion = gsub(" ", "", subregion)), by=c("state"="region", "countyName"="subregion"))
 
 temp_choices <- c("90th Percentile of Temps"="p90_total",
                   "Number of Days Over 90 Degrees F"="do90_total",
@@ -36,120 +41,67 @@ survey_choices <- c("% who think global warming is happening"="happening",
                      "% who think global warmig will harm people in the US"="harmUS",
                      "% who think global warming will harm them personally"="personal")
 
-
-
 ### Define UI for application
-ui <- fluidPage(
-  # Application title
-  titlePanel(title = "Changes in U.S. County Climate (1970-2019)"),
+ui <- navbarPage("Changes in U.S. County Climate (1970-2019)",
   
-  sidebarLayout(
-    
-    # Sidebar typically used to house input controls
-    sidebarPanel(
+  tabPanel("Map Overview",
+    fluidRow(
+      column(6,
+             plotOutput(outputId="climatemap", height = 600),
+             
+             selectInput(inputId = "climate_yvar",
+                         label = "Select Climate Variable of Interest",
+                         choices = temp_choices,
+                         width="90%")),
+      column(6, 
+             plotOutput(outputId="surveymap", height = 600),
+             
+             selectInput(inputId = "survey_yvar",
+                      label = "Select Survey Response Variable",
+                      choices = survey_choices,
+                      width="90%"))
+    )         
+  ),
+  
+  tabPanel("County Comparison",
+    sidebarLayout(
+      sidebarPanel(width=3, 
+        tags$h4("Choose Climate and Survey Variables"),
+
+        selectInput(inputId = "climate_var",
+                    label = "Select Climate Variable of Interest",
+                    choices = temp_choices),
+        selectInput(inputId = "survey_var",
+                    label = "Select Survey Response Variable",
+                    choices = survey_choices),
+        #the state drop down is rendered as a UI in the server
+        uiOutput(outputId = "state")),
       
-      ##this conditional panel is for county comparison/detail tabs (tab 2&3)
-      conditionalPanel(tags$h4("Choose Climate and Survey Variables"),
-                       condition = "input.tabs != 'Map Overview' ",
-                       
-                         selectInput(
-                           inputId = "climate_var",
-                           label = "Select Climate Variable of Interest",
-                           choices = temp_choices
-                         ),
-                         selectInput(
-                           inputId = "survey_var",
-                           label = "Select Survey Response Variable",
-                           choices = survey_choices
-                         )
-                       
-      ),
+      mainPanel(plotlyOutput(outputId="barplot"))
+    )
+  ),
+  
+  tabPanel("County Detail",
+    sidebarLayout(
+      sidebarPanel(uiOutput(outputId = "county")),
       
-      ##this conditional panel is for map tab (tab 1)
-      conditionalPanel(tags$h4("Choose Mapping Variable"),
-                       condition = "input.tabs == 'Map Overview' ",
-                       
-                       selectInput(
-                         inputId = "map_type",
-                         label = "Select Map Type",
-                         choices = c("Climate Variables","Survey Variables", "Urban/Rural")
-                       ),
-                       uiOutput(outputId = "yvar_choices"),
-                      
-                        selectInput(
-                         inputId = "region",
-                         label = "Select Climate Region",
-                         choices = region_choices,
-                         selected = region_choices,
-                         multiple = T
-                       )
-                       
-      ),
-      
-      #the state drop down is rendered as a UI in the server
-      uiOutput(outputId = "state"),
-      
-      #the county drop down is rendered as a UI in the server
-      uiOutput(outputId = "county")
-      
-    ),
-    
-    # Main panel typically used to display outputs
-    mainPanel(
-      
-      tabsetPanel(id = "tabs",
-                  tabPanel("Map Overview", plotOutput(outputId="mapplot")),
-                  tabPanel("County Comparison", plotOutput(outputId="barplot")),
-                  tabPanel("County Detail", plotlyOutput(outputId="tempplot"))
-      )
+      mainPanel(plotlyOutput(outputId="tempplot"))
     )
   )
 )
+    
+
 
 ### Define server behavior for application here
 server <- function(input, output) {
   
-  output$yvar_choices <- renderUI({
-    
-    if(input$map_type == "Climate Variables") {
-      selectInput(
-        inputId = "yvar",
-        label = "Select Climate Variable of Interest",
-        choices = temp_choices
-      )
-    }
-    else if(input$map_type == "Survey Variables") {
-      selectInput(
-        inputId = "yvar",
-        label = "Select Survey Response Variable",
-        choices = survey_choices
-      )
-    }
-    else {
-      selectInput(
-        inputId = "yvar",
-        label = "Select Urban/Rural Variable",
-        choices = c("Percent Urban" = "percent_urban",
-                    "Urban Population"="urban_pop")
-      )
-    }
-  })
-  
   output$state <- renderUI({
     
-    #this dataset determines the genres in genre drop down
-    state_options <- county_full %>%
-      filter(climateRegion %in% input$region ) %>%
-      select(climateRegion, state) %>%
-      unique()
-    
-    #this is the actual dropdown used in tab 1
     selectInput(
       inputId = "state",
       label = "Select Specific States",
-      choices = state_options$state,
-      selected = state_options$state,
-      multiple = ifelse(input$tabs!="County Detail",T,F)
+      choices = unique(county_full$state),
+      multiple = F
     )
     
   })
@@ -165,64 +117,94 @@ server <- function(input, output) {
         inputId = "county",
         label = "Select Specific Counties",
         choices = county_options$county,
-        #selected = county_options$county,
-        multiple = ifelse(input$tabs!="County Detail",T,F))
+        multiple = F)
   
   })
   
-  output$mapplot <- renderPlot({ 
+  
+  output$climatemap <- renderPlot({ 
     
-    region_subset <- county_map %>%
-      filter(str_remove_all(region, " ") %in% input$state) 
-    
-    if(input$map_type == "Climate Variables") {
-      plot_colors <- c("blue","white","red")
-    }
-    else if(input$map_type == "Survey Variables") {
-      plot_colors <- c("white","white","purple")
-    }
-    else {
-      plot_colors <- c("white","white","darkgreen")
-    }
-    
-     ggplot(region_subset) +
-      geom_polygon(aes_string(x="long", y="lat", group="group", fill=input$yvar), color="black") +
-      scale_fill_gradient2(low=plot_colors[1], mid = plot_colors[2], high=plot_colors[3]) +
-      theme_map() + theme(legend.position = "right") +
-      coord_map("conic", lat0 = 30)
-
+    ggplot(counties_map) +
+      geom_polygon(aes_string(x="long", y="lat", group="group", fill=input$climate_yvar), color="black") + 
+      scale_fill_gradientn(colors=c("#390099", "#edf2f4", "#d90429")) +
+      coord_quickmap() +
+      theme_map() +
+      theme(legend.position=c(.87, 0.25))
   })
   
+  output$surveymap <- renderPlot({ 
+    ggplot(counties_map) +
+      geom_polygon(aes_string(x="long", y="lat", group="group", fill=input$survey_yvar), color="black") + 
+      scale_fill_gradientn(colors=c("#390099", "#edf2f4", "#d90429")) +
+      coord_quickmap() +
+      theme_map() +
+      theme(legend.position=c(.87, 0.25))
+  })
+    
   
-  output$barplot <- renderPlot({ 
+  output$barplot <- renderPlotly({ 
     
     region_subset <- county_full %>%
       filter(state %in% input$state) 
- 
+    
+    region_subset$county <- factor(region_subset$county, 
+                                   levels = unique(region_subset$county)[order(region_subset[[input$climate_var]],
+                                                                               decreasing = FALSE)])
+    # PLOT BUILDING
     p1 <- region_subset %>%
-      mutate(county = fct_reorder(county, get(input$climate_var))) %>%
-      ggplot() + 
-      geom_bar(aes_string(x="county", 
-                          y=input$climate_var,
-                          fill="binary_status"), 
-               stat = "identity") + 
-      coord_flip() +
-      theme_minimal() +
-      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+      group_by(county) %>%
+      plot_ly(
+        type = 'bar',
+        orientation = 'h',
+        y=~county,
+        x = as.formula(paste0("~",input$climate_var)),
+        #x = ~p90_total,
+        color= ~binary_status,
+        #colors=region_colors,
+        hoverinfo = 'text',
+        text = ~paste0(county,": ",round(p90_total,2))) 
     
-    
+    # PLOT BUILDING
     p2 <- region_subset %>%
-      mutate(county = fct_reorder(county, get(input$climate_var))) %>%
-      ggplot() + 
-      geom_bar(aes_string(x="county", 
-                          y=input$survey_var,
-                          fill="binary_status"), 
-               stat = "identity") + 
-      coord_flip() +
-      theme_minimal() +
-      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+      group_by(county) %>%
+      plot_ly(
+        type = 'bar',
+        orientation = 'h',
+        y=~county,
+        x = as.formula(paste0("~",input$survey_var)),
+        #x = ~p90_total,
+        color= ~binary_status,
+        #colors=region_colors,
+        hoverinfo = 'text',
+        text = ~paste0(county,": ",round(p90_total,2))) 
     
-    gridExtra::grid.arrange(p1,p2, ncol=1)
+    subplot(p1,p2)
+    
+    
+    # p1 <- region_subset %>%
+    #   mutate(county = fct_reorder(county, get(input$climate_var))) %>%
+    #   ggplot() + 
+    #   geom_bar(aes_string(x="county", 
+    #                       y=input$climate_var,
+    #                       fill="binary_status"), 
+    #            stat = "identity") + 
+    #   coord_flip() +
+    #   theme_minimal() +
+    #   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+    # 
+    # 
+    # p2 <- region_subset %>%
+    #   mutate(county = fct_reorder(county, get(input$climate_var))) %>%
+    #   ggplot() + 
+    #   geom_bar(aes_string(x="county", 
+    #                       y=input$survey_var,
+    #                       fill="binary_status"), 
+    #            stat = "identity") + 
+    #   coord_flip() +
+    #   theme_minimal() +
+    #   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+    # 
+    # gridExtra::grid.arrange(p1,p2, ncol=1)
   })
   
   output$tempplot <- renderPlotly({ 
@@ -246,6 +228,7 @@ server <- function(input, output) {
              xaxis=list(title="Year"))
     
   })
+
 }
 
 ### specify the ui and server objects to be combined to make App
